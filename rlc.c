@@ -4,6 +4,11 @@
 #include <sys/types.h>
 #include <sys/inotify.h>
 #include <limits.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <string.h>
+
  
 #define MAX_EVENTS 1024 /*Max. number of events to process at one go*/
 #define LEN_NAME 64 /*Assuming that the length of the filename won't exceed 64 bytes*/
@@ -11,10 +16,28 @@
 #define BUF_LEN     ( MAX_EVENTS * ( EVENT_SIZE + LEN_NAME )) /*buffer to store the data of events*/
  
 
+char *build_http_message(char *host, char *page,char *data) {
+  char *query;
+  char *tpl = "POST /%s HTTP/1.1\r\nHost: %s\r\nConnection: keep-alive\r\nContent-Length: %d\r\nContent-Type: application/x-www-form-urlencoded; charset=UTF-8\r\n\r\n%s\r\n";
+  query = (char *)malloc(strlen(page)+strlen(host)+strlen(tpl));
+  sprintf(query, tpl, page, host,strlen(data),data);
+  return query;
+}
 int main( int argc, char **argv ){
   int length, i = 0, wd;
   int fd;
   char buffer[BUF_LEN];
+  int sock;
+
+  char * url="http://210.14.153.185:10086/sdkserver/testpost";
+  char host[1000];
+  char page[1000];
+  int port;
+  sscanf(url, "http://%99[^:]:%99d/%99[^\n]", host, &port, page);
+  printf("host:%s\n",host);
+  printf("port:%d\n",port);
+  printf("page:%s\n",page);
+  sock = create_socket_and_connect(url,host,port);
 
   FILE * fp;
   char * line = NULL;
@@ -84,6 +107,10 @@ int main( int argc, char **argv ){
                 while ((readlen = getline(&line, &len, fp)) != -1) {
                     readlen = getline(&line, &len, fp);
                     printf("%s", line);
+                    char *data = (char *)malloc(strlen("datas=")+strlen(line));
+                    sprintf(data, "datas=%s", line);
+                    char *http_message = build_http_message(host, page,data);
+                    send(sock, http_message, strlen(http_message), 0);
                 }
               }
             }
@@ -102,6 +129,61 @@ int main( int argc, char **argv ){
   /* Clean up*/
   inotify_rm_watch( fd, wd );
   close( fd );
-   
+  close(sock);
   return 0;
 }
+int create_tcp_socket() {
+  int sock;
+  if((sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0){
+    perror("Can't create TCP socket");
+    exit(1);
+  }
+  return sock;
+}
+char *get_ip(char *host) {
+  struct hostent *hent;
+  int iplen = 15; //XXX.XXX.XXX.XXX
+  char *ip = (char *)malloc(iplen+1);
+  memset(ip, 0, iplen+1);
+  if((hent = gethostbyname(host)) == NULL) {
+    herror("Can't get IP");
+    exit(1);
+  }
+  if(inet_ntop(AF_INET, (void *)hent->h_addr_list[0], ip, iplen) == NULL) {
+    perror("Can't resolve host");
+    exit(1);
+  }
+  return ip;
+}
+int create_socket_and_connect(char* url,char* host,int port){
+  struct sockaddr_in *remote;
+  int sock;
+  int tmpres;
+  char *ip;
+  char *http_message;
+  char buf[BUFSIZ+1];
+
+
+
+  sock = create_tcp_socket();
+  ip = get_ip(host);
+  printf("ip: %s\n", ip);
+  remote = (struct sockaddr_in *)malloc(sizeof(struct sockaddr_in *));
+  remote->sin_family = AF_INET;
+  tmpres = inet_pton(AF_INET, ip, (void *)(&(remote->sin_addr.s_addr)));
+  if( tmpres < 0)  {
+    perror("Can't set remote->sin_addr.s_addr");
+    exit(1);
+  }else if(tmpres == 0) {
+    fprintf(stderr, "%s is not a valid IP address\n", ip);
+    exit(1);
+  }
+  remote->sin_port = htons(port);
+
+  if(connect(sock, (struct sockaddr *)remote, sizeof(struct sockaddr)) < 0){
+    perror("Could not connect");
+    exit(1);
+  }
+  return sock;
+}
+
