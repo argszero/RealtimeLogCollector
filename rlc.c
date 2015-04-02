@@ -29,7 +29,7 @@ int main( int argc, char **argv ){
   char buffer[BUF_LEN];
   int sock;
 
-  char * url="http://210.14.153.185:10086/sdkserver/testpost";
+  char * url="http://210.14.153.185:8080/hotitem/businesslog";
   char host[1000];
   char page[1000];
   int port;
@@ -107,8 +107,8 @@ int main( int argc, char **argv ){
                 while ((readlen = getline(&line, &len, fp)) != -1) {
                     readlen = getline(&line, &len, fp);
                     printf("%s", line);
-                    char *data = (char *)malloc(strlen("datas=")+strlen(line));
-                    sprintf(data, "datas=%s", line);
+                    char *data = (char *)malloc(strlen("log=")+strlen(line));
+                    sprintf(data, "log=%s", line);
                     char *http_message = build_http_message(host, page,data);
                     send(sock, http_message, strlen(http_message), 0);
                 }
