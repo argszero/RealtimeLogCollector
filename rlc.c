@@ -14,124 +14,153 @@
 #define LEN_NAME 64 /*Assuming that the length of the filename won't exceed 64 bytes*/
 #define EVENT_SIZE  ( sizeof (struct inotify_event) ) /*size of one event*/
 #define BUF_LEN     ( MAX_EVENTS * ( EVENT_SIZE + LEN_NAME )) /*buffer to store the data of events*/
- 
 
-char *build_http_message(char *host, char *page,char *data) {
-  char *query;
-  char *tpl = "POST /%s HTTP/1.1\r\nHost: %s\r\nConnection: keep-alive\r\nContent-Length: %d\r\nContent-Type: application/x-www-form-urlencoded; charset=UTF-8\r\n\r\n%s\r\n";
-  query = (char *)malloc(strlen(page)+strlen(host)+strlen(tpl));
-  sprintf(query, tpl, page, host,strlen(data),data);
-  return query;
-}
+struct url{
+    char *url;
+    char schema[100];
+    char host[1000];
+    char page[1000];
+    int port;
+};
+
+struct url parse_url(char *url);
+
+
+
+/*
+build http1.1 post message
+*/
+char *build_http_message(char *host, char *page,char *data,char *query);
+/*
+create socket connected to specified url
+*/
+int create_socket_and_connect(struct url url);
+/*
+open file with read mode
+*/
+FILE * open_file(char *dir,char *file);
+/*
+read file to the end
+*/
+void read_file_to_end(FILE *fp,struct url url,int sock,void(*process)(char *,struct url url,int sock));
+
+void do_nothing(char *line,struct url url,int sock);
+void send_log_to_server(char *line,struct url url,int sock);
+
+void watch(char *dir,char *file,uint32_t mask,struct url url,int sock);
+
+/*
+usage: ./rlc xx/xx/log xxx.log http://operation01:8080/hotitem/businesslog
+*/
 int main( int argc, char **argv ){
+  struct url url = parse_url(argv[3]);
+  int sock = create_socket_and_connect(url);
+  watch(argv[1],argv[2],IN_CREATE | IN_MODIFY | IN_DELETE,url,sock);
+  close(sock);
+  return 0;
+}
+void process_event(struct inotify_event *event,struct url url,int sock,FILE **fp,char *dir,char *file){
+         if ( event->mask & IN_CREATE) {
+            if (event->mask & IN_ISDIR){} else{
+                printf("created %s\n",event->name);
+                if(strcmp(event->name , file)==0){
+                    fclose(*fp);
+                    *fp = open_file(dir, file);
+                }
+            }
+          }
+
+          if ( event->mask & IN_MODIFY) {
+            if (event->mask & IN_ISDIR){}
+            else{
+              if(strcmp(event->name , file)==0){
+                 read_file_to_end(*fp,url,sock,send_log_to_server);
+              }
+            }
+          }
+
+          if ( event->mask & IN_DELETE) {
+            if (event->mask & IN_ISDIR){} else{}
+          }
+}
+void watch(char *dir,char *file,uint32_t mask,struct url url,int sock){
   int length, i = 0, wd;
   int fd;
   char buffer[BUF_LEN];
-  int sock;
-
-  char * url="http://operation01:8080/hotitem/businesslog";
-  char host[1000];
-  char page[1000];
-  int port;
-  sscanf(url, "http://%99[^:]:%99d/%99[^\n]", host, &port, page);
-  printf("host:%s\n",host);
-  printf("port:%d\n",port);
-  printf("page:%s\n",page);
-  sock = create_socket_and_connect(url,host,port);
-
-  FILE * fp;
-  char * line = NULL;
-  size_t len = 0;
-  ssize_t readlen;
-
-
-
+  FILE *fp;
   /* Initialize Inotify*/
   fd = inotify_init();
-  if ( fd < 0 ) {
-    perror( "Couldn't initialize inotify");
-  }
- 
   /* add watch to starting directory */
-  wd = inotify_add_watch(fd, argv[1], IN_CREATE | IN_MODIFY | IN_DELETE); 
- 
-  if (wd == -1)
-    {
-      printf("Couldn't add watch to %s\n",argv[1]);
-    }
-  else
-    {
-      printf("Watching:: %s\n",argv[1]);
-    }
- 
-  char * name = malloc(strlen(argv[1])+strlen(argv[2]) + 2);
-  sprintf(name,"%s/%s", argv[1], argv[2]);
-  printf("open : %s\n",name);
-  fp = fopen(name, "r");
-  while ((readlen = getline(&line, &len, fp)) != -1) {
-                    readlen = getline(&line, &len, fp);
-                    printf("%s", line);
-    
-  }
+  wd = inotify_add_watch(fd, dir, mask);
+
+  fp = open_file(dir,file);
+  read_file_to_end(fp,url,sock,do_nothing);
 
   /* do it forever*/
   while(1)
     {
-      i = 0;
-      length = read( fd, buffer, BUF_LEN );  
- 
-      if ( length < 0 ) {
-        perror( "read" );
-      }  
- 
+      int i = 0;
+      int length = read( fd, buffer, BUF_LEN );
       while ( i < length ) {
         struct inotify_event *event = ( struct inotify_event * ) &buffer[ i ];
         if ( event->len ) {
-          if ( event->mask & IN_CREATE) {
-            if (event->mask & IN_ISDIR){} else{
-                printf("created %s\n",event->name);
-                if(strcmp(event->name , argv[2])==0){
-                    if (fp != NULL){
-                        fclose(fp);
-                    }
-                    //fp = fopen(argv[2], "r");
-                    fp = fopen(name, "r");
-                }
-            }
-          }
-           
-          if ( event->mask & IN_MODIFY) {
-            if (event->mask & IN_ISDIR){}
-            else{
-              if(strcmp(event->name , argv[2])==0){
-                while ((readlen = getline(&line, &len, fp)) != -1) {
-                    readlen = getline(&line, &len, fp);
-                    printf("%s", line);
-                    char *data = (char *)malloc(strlen("log=")+strlen(line));
-                    sprintf(data, "log=%s", line);
-                    char *http_message = build_http_message(host, page,data);
-                    send(sock, http_message, strlen(http_message), 0);
-                }
-              }
-            }
-          }
-           
-          if ( event->mask & IN_DELETE) {
-            if (event->mask & IN_ISDIR){} else{}
-          }  
- 
- 
+           process_event(event,url,sock,&fp,dir,file);
           i += EVENT_SIZE + event->len;
         }
       }
     }
- 
+
   /* Clean up*/
   inotify_rm_watch( fd, wd );
   close( fd );
   close(sock);
-  return 0;
 }
+
+void do_nothing(char *line,struct url url,int sock){
+}
+void send_log_to_server(char *line,struct url url,int sock){
+  char *data = (char *)malloc(strlen("log=")+strlen(line));
+  sprintf(data, "log=%s", line);
+  char query[100000];
+  build_http_message(url.host, url.page,data,&query[0]);
+  send(sock, query, strlen(query), 0);
+  free(data);
+}
+void read_file_to_end(FILE *fp,struct url url,int sock,void(*process)(char *,struct url url,int sock)){
+  char * line = NULL;
+  size_t len = 0;
+  ssize_t readlen;
+  while ((readlen = getline(&line, &len, fp)) != -1) {
+                    readlen = getline(&line, &len, fp);
+                    printf("%s", line);
+        (*process)(line,url,sock);
+  }
+}
+
+FILE * open_file(char *dir,char *file){
+    char * name = malloc(strlen(dir)+strlen(file) + 2);
+    sprintf(name,"%s/%s", dir, file);
+    printf("open : %s\n",name);
+    FILE *fp = fopen(name, "r");
+    free(name);
+    return fp;
+}
+struct url parse_url(char *url){
+  struct url u;
+  sscanf(url, "%[^://]://%99[^:]:%99d/%99[^\n]",u.schema, u.host, &u.port, u.page);
+  printf("host:%s\n",u.host);
+  printf("port:%d\n",u.port);
+  printf("page:%s\n",u.page);
+  return u;
+}
+char *build_http_message(char *host, char *page,char *data,char *query) {
+  //char *query;
+  char *tpl = "POST /%s HTTP/1.1\r\nHost: %s\r\nConnection: keep-alive\r\nContent-Length: %d\r\nContent-Type: application/x-www-form-urlencoded; charset=UTF-8\r\n\r\n%s\r\n\0";
+  //query = (char *)malloc(strlen(page)+strlen(host)+strlen(tpl));
+  sprintf(query, tpl, page, host,strlen(data),data);
+  return query;
+}
+
 int create_tcp_socket() {
   int sock;
   if((sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0){
@@ -155,7 +184,7 @@ char *get_ip(char *host) {
   }
   return ip;
 }
-int create_socket_and_connect(char* url,char* host,int port){
+int create_socket_and_connect(struct url url){
   struct sockaddr_in *remote;
   int sock;
   int tmpres;
@@ -166,7 +195,7 @@ int create_socket_and_connect(char* url,char* host,int port){
 
 
   sock = create_tcp_socket();
-  ip = get_ip(host);
+  ip = get_ip(url.host);
   printf("ip: %s\n", ip);
   remote = (struct sockaddr_in *)malloc(sizeof(struct sockaddr_in *));
   remote->sin_family = AF_INET;
@@ -178,7 +207,7 @@ int create_socket_and_connect(char* url,char* host,int port){
     fprintf(stderr, "%s is not a valid IP address\n", ip);
     exit(1);
   }
-  remote->sin_port = htons(port);
+  remote->sin_port = htons(url.port);
 
   if(connect(sock, (struct sockaddr *)remote, sizeof(struct sockaddr)) < 0){
     perror("Could not connect");
