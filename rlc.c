@@ -29,7 +29,7 @@ int main( int argc, char **argv ){
   char buffer[BUF_LEN];
   int sock;
 
-  char * url="http://210.14.153.185:8080/hotitem/businesslog";
+  char * url="http://operation01:8080/hotitem/businesslog";
   char host[1000];
   char page[1000];
   int port;
