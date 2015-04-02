@@ -42,12 +42,12 @@ FILE * open_file(char *dir,char *file);
 /*
 read file to the end
 */
-void read_file_to_end(FILE *fp,struct url url,int sock,void(*process)(char *,struct url url,int sock));
+void read_file_to_end(FILE *fp,struct url url,int *sock,void(*process)(char *,struct url url,int *sock));
 
-void do_nothing(char *line,struct url url,int sock);
-void send_log_to_server(char *line,struct url url,int sock);
+void do_nothing(char *line,struct url url,int *sock);
+void send_log_to_server(char *line,struct url url,int *sock);
 
-void watch(char *dir,char *file,uint32_t mask,struct url url,int sock);
+void watch(char *dir,char *file,uint32_t mask,struct url url,int *sock);
 
 /*
 usage: ./rlc xx/xx/log xxx.log http://operation01:8080/hotitem/businesslog
@@ -55,11 +55,11 @@ usage: ./rlc xx/xx/log xxx.log http://operation01:8080/hotitem/businesslog
 int main( int argc, char **argv ){
   struct url url = parse_url(argv[3]);
   int sock = create_socket_and_connect(url);
-  watch(argv[1],argv[2],IN_CREATE | IN_MODIFY | IN_DELETE,url,sock);
+  watch(argv[1],argv[2],IN_CREATE | IN_MODIFY | IN_DELETE,url,&sock);
   close(sock);
   return 0;
 }
-void process_event(struct inotify_event *event,struct url url,int sock,FILE **fp,char *dir,char *file){
+void process_event(struct inotify_event *event,struct url url,int *sock,FILE **fp,char *dir,char *file){
          if ( event->mask & IN_CREATE) {
             if (event->mask & IN_ISDIR){} else{
                 printf("created %s\n",event->name);
@@ -83,7 +83,7 @@ void process_event(struct inotify_event *event,struct url url,int sock,FILE **fp
             if (event->mask & IN_ISDIR){} else{}
           }
 }
-void watch(char *dir,char *file,uint32_t mask,struct url url,int sock){
+void watch(char *dir,char *file,uint32_t mask,struct url url,int *sock){
   int length, i = 0, wd;
   int fd;
   char buffer[BUF_LEN];
@@ -116,17 +116,24 @@ void watch(char *dir,char *file,uint32_t mask,struct url url,int sock){
   close(sock);
 }
 
-void do_nothing(char *line,struct url url,int sock){
+void do_nothing(char *line,struct url url,int *sock){
 }
-void send_log_to_server(char *line,struct url url,int sock){
+void send_log_to_server(char *line,struct url url,int *sock){
   char *data = (char *)malloc(strlen("log=")+strlen(line));
   sprintf(data, "log=%s", line);
   char query[100000];
   build_http_message(url.host, url.page,data,&query[0]);
-  send(sock, query, strlen(query), 0);
+  //send(sock, query, strlen(query), 0);
+  int ret = send(*sock, query, strlen(query), MSG_NOSIGNAL);
+  if (ret == -1) {
+    //retry
+    printf("retry connect!\n");
+    *sock = create_socket_and_connect(url);
+    send(*sock, query, strlen(query), 0);
+  }
   free(data);
 }
-void read_file_to_end(FILE *fp,struct url url,int sock,void(*process)(char *,struct url url,int sock)){
+void read_file_to_end(FILE *fp,struct url url,int *sock,void(*process)(char *,struct url url,int *sock)){
   char * line = NULL;
   size_t len = 0;
   ssize_t readlen;
