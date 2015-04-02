@@ -199,8 +199,6 @@ int create_socket_and_connect(struct url url){
     char *http_message;
     char buf[BUFSIZ+1];
 
-
-
     sock = create_tcp_socket();
     ip = get_ip(url.host);
     printf("ip: %s\n", ip);
