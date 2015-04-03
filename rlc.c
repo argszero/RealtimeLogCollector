@@ -118,8 +118,22 @@ void watch(char *dir,char *file,uint32_t mask,struct url url,int *sock){
 
 void do_nothing(char *line,struct url url,int *sock){
 }
+int needSend(char *line){
+    char line_cp[10000] ;
+    strcpy(line_cp, line);
+    char *p = strtok(line_cp,"\2");
+    int i=0;
+    while (p != NULL) {
+        if(++i >9)break;
+        p = strtok(NULL,"\2");
+    }
+    return (i==10 && p!=NULL && (strcmp(p , "2")==0));
+}
 void send_log_to_server(char *line,struct url url,int *sock){
-    char *data = (char *)malloc(strlen("log=")+strlen(line));
+    if(!needSend(line)){
+        return;
+    }
+    char data[10000];
     sprintf(data, "log=%s", line);
     char query[100000];
     build_http_message(url.host, url.page,data,&query[0]);
@@ -131,7 +145,6 @@ void send_log_to_server(char *line,struct url url,int *sock){
         *sock = create_socket_and_connect(url);
         send(*sock, query, strlen(query), 0);
     }
-    free(data);
 }
 void read_file_to_end(FILE *fp,struct url url,int *sock,void(*process)(char *,struct url url,int *sock)){
     char * line = NULL;
@@ -139,7 +152,6 @@ void read_file_to_end(FILE *fp,struct url url,int *sock,void(*process)(char *,st
     ssize_t readlen;
     while ((readlen = getline(&line, &len, fp)) != -1) {
         readlen = getline(&line, &len, fp);
-        printf("%s", line);
         (*process)(line,url,sock);
     }
 }
