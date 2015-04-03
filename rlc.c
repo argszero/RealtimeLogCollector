@@ -144,6 +144,7 @@ void send_log_to_server(char *line,struct url url,int *sock){
         printf("retry connect!\n");
         *sock = create_socket_and_connect(url);
         send(*sock, query, strlen(query), 0);
+
     }
 }
 void read_file_to_end(FILE *fp,struct url url,int *sock,void(*process)(char *,struct url url,int *sock)){
